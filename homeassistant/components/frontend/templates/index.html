@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>Home Assistant</title>
+    <title>Domo</title>
 
     <link rel='manifest' href='/static/manifest.json'>
     <link rel='icon' href='/static/icons/favicon.ico'>
@@ -61,10 +61,14 @@
         font-size: 16px;
       }
 
+      .logo {
+        max-width: 85%
+      }
       #ha-init-skeleton.error img,
       #ha-init-skeleton.error paper-spinner {
         display: none;
       }
+
     </style>
     <script>
       function initError() {
@@ -78,9 +82,9 @@
   </head>
   <body>
     <div id='ha-init-skeleton'>
-      <img src='/static/Domo.png' height='192'>
+      <img src='/static/Domo.png' class='logo'>
       <paper-spinner active></paper-spinner>
-      Home Assistant had trouble<br>connecting to the server.<br><br><a href='/'>TRY AGAIN</a>
+      Domo had trouble<br>connecting to the server.<br><br><a href='/'>TRY AGAIN</a>
     </div>
     <home-assistant icons='{{ icons }}'></home-assistant>
     {# <script src='/static/home-assistant-polymer/build/_demo_data_compiled.js'></script> #}
