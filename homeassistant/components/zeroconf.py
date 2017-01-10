@@ -19,17 +19,18 @@ _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "zeroconf"
 
-ZEROCONF_TYPE = "_home-assistant._tcp.local."
+ZEROCONF_TYPE = "_domo._tcp.local."
 
+from zeroconf import Zeroconf, ServiceInfo, BadTypeInNameException
+
+zeroconf = Zeroconf()
 
 def setup(hass, config):
     """Set up Zeroconf and make Home Assistant discoverable."""
-    from zeroconf import Zeroconf, ServiceInfo
-
-    zeroconf = Zeroconf()
 
     zeroconf_name = "{}.{}".format(hass.config.location_name,
                                    ZEROCONF_TYPE)
+    # logging.getLogger('zeroconf').setLevel(logging.DEBUG)
 
     requires_api_password = (hass.config.api.api_password is not None)
     params = {"version": __version__, "base_url": hass.config.api.base_url,
@@ -38,8 +39,12 @@ def setup(hass, config):
     info = ServiceInfo(ZEROCONF_TYPE, zeroconf_name,
                        socket.inet_aton(hass.config.api.host),
                        hass.config.api.port, 0, 0, params)
-
-    zeroconf.register_service(info)
+    _LOGGER.info("Zeroconf service information: %s", info)
+    try:
+        zeroconf.register_service(info)
+    except BadTypeInNameException:
+        _LOGGER.error("Exception raised by zeroconf register_service, "
+                      "data that was tried to register: %s", info)
 
     def stop_zeroconf(event):
         """Stop Zeroconf."""

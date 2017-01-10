@@ -489,6 +489,7 @@ class ZWaveDeviceEntity:
         return "ZWAVE-{}-{}".format(self._value.node.node_id,
                                     self._value.object_id)
 
+
     @property
     def name(self):
         """Return the name of the device."""
