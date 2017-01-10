@@ -6,13 +6,15 @@ https://home-assistant.io/components/media_player.roku/
 """
 import logging
 
+import voluptuous as vol
+
 from homeassistant.components.media_player import (
     MEDIA_TYPE_VIDEO, SUPPORT_NEXT_TRACK, SUPPORT_PLAY_MEDIA,
     SUPPORT_PREVIOUS_TRACK, SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_SET,
-    SUPPORT_SELECT_SOURCE, MediaPlayerDevice)
-
+    SUPPORT_SELECT_SOURCE, SUPPORT_PLAY, MediaPlayerDevice, PLATFORM_SCHEMA)
 from homeassistant.const import (
     CONF_HOST, STATE_IDLE, STATE_PLAYING, STATE_UNKNOWN, STATE_HOME)
+import homeassistant.helpers.config_validation as cv
 
 REQUIREMENTS = [
     'https://github.com/bah2830/python-roku/archive/3.1.2.zip'
@@ -25,10 +27,13 @@ _LOGGER = logging.getLogger(__name__)
 
 SUPPORT_ROKU = SUPPORT_PREVIOUS_TRACK | SUPPORT_NEXT_TRACK |\
     SUPPORT_PLAY_MEDIA | SUPPORT_VOLUME_SET | SUPPORT_VOLUME_MUTE |\
-    SUPPORT_SELECT_SOURCE
+    SUPPORT_SELECT_SOURCE | SUPPORT_PLAY
+
+PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+    vol.Optional(CONF_HOST): cv.string,
+})
 
 
-# pylint: disable=abstract-method
 def setup_platform(hass, config, add_devices, discovery_info=None):
     """Setup the Roku platform."""
     hosts = []
@@ -41,7 +46,7 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
         hosts.append(discovery_info[0])
 
     elif CONF_HOST in config:
-        hosts.append(config[CONF_HOST])
+        hosts.append(config.get(CONF_HOST))
 
     rokus = []
     for host in hosts:
@@ -59,8 +64,6 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
 class RokuDevice(MediaPlayerDevice):
     """Representation of a Roku device on the network."""
 
-    # pylint: disable=abstract-method
-    # pylint: disable=too-many-public-methods
     def __init__(self, host):
         """Initialize the Roku device."""
         from roku import Roku
@@ -88,7 +91,8 @@ class RokuDevice(MediaPlayerDevice):
                 self.current_app = None
         except (requests.exceptions.ConnectionError,
                 requests.exceptions.ReadTimeout):
-            _LOGGER.error("Unable to connect to roku at %s", self.ip_address)
+
+            pass
 
     def get_source_list(self):
         """Get the list of applications to be used as sources."""

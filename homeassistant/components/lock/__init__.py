@@ -21,7 +21,8 @@ from homeassistant.const import (
 from homeassistant.components import group
 
 DOMAIN = 'lock'
-SCAN_INTERVAL = 30
+SCAN_INTERVAL = timedelta(seconds=30)
+ATTR_CHANGED_BY = 'changed_by'
 
 GROUP_NAME_ALL_LOCKS = 'all locks'
 ENTITY_ID_ALL_LOCKS = group.ENTITY_ID_FORMAT.format('all_locks')
@@ -84,8 +85,11 @@ def setup(hass, config):
             else:
                 item.unlock(code=code)
 
-            if item.should_poll:
-                item.update_ha_state(True)
+        for item in target_locks:
+            if not item.should_poll:
+                continue
+
+            item.update_ha_state(True)
 
     descriptions = load_yaml_config_file(
         os.path.join(os.path.dirname(__file__), 'services.yaml'))
@@ -100,6 +104,11 @@ def setup(hass, config):
 
 class LockDevice(Entity):
     """Representation of a lock."""
+
+    @property
+    def changed_by(self):
+        """Last change triggered by."""
+        return None
 
     # pylint: disable=no-self-use
     @property
@@ -127,6 +136,7 @@ class LockDevice(Entity):
             return None
         state_attr = {
             ATTR_CODE_FORMAT: self.code_format,
+            ATTR_CHANGED_BY: self.changed_by
         }
         return state_attr
 

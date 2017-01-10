@@ -17,9 +17,9 @@ DEPENDENCIES = ['vera']
 _LOGGER = logging.getLogger(__name__)
 
 
-def setup_platform(hass, config, add_devices_callback, discovery_info=None):
+def setup_platform(hass, config, add_devices, discovery_info=None):
     """Perform the setup for Vera controller devices."""
-    add_devices_callback(
+    add_devices(
         VeraSensor(device, VERA_CONTROLLER)
         for device in VERA_DEVICES['sensor'])
 
@@ -51,7 +51,8 @@ class VeraSensor(VeraDevice, Entity):
     def update(self):
         """Update the state."""
         if self.vera_device.category == "Temperature Sensor":
-            current_temp = self.vera_device.temperature
+            self.current_value = self.vera_device.temperature
+
             vera_temp_units = (
                 self.vera_device.vera_controller.temperature_units)
 
@@ -60,14 +61,6 @@ class VeraSensor(VeraDevice, Entity):
             else:
                 self._temperature_units = TEMP_CELSIUS
 
-            if self.hass:
-                temp = self.hass.config.temperature(
-                    current_temp,
-                    self._temperature_units)
-
-                current_temp, self._temperature_units = temp
-
-            self.current_value = current_temp
         elif self.vera_device.category == "Light Sensor":
             self.current_value = self.vera_device.light
         elif self.vera_device.category == "Humidity Sensor":

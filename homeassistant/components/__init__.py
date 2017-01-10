@@ -7,11 +7,11 @@ Component design guidelines:
   format "<DOMAIN>.<OBJECT_ID>".
 - Each component should publish services only under its own domain.
 """
+import asyncio
 import itertools as it
 import logging
 
 import homeassistant.core as ha
-from homeassistant.helpers.entity import split_entity_id
 from homeassistant.helpers.service import extract_entity_ids
 from homeassistant.loader import get_component
 from homeassistant.const import (
@@ -35,7 +35,7 @@ def is_on(hass, entity_id=None):
         entity_ids = hass.states.entity_ids()
 
     for entity_id in entity_ids:
-        domain = split_entity_id(entity_id)[0]
+        domain = ha.split_entity_id(entity_id)[0]
 
         module = get_component(domain)
 
@@ -80,8 +80,10 @@ def reload_core_config(hass):
     hass.services.call(ha.DOMAIN, SERVICE_RELOAD_CORE_CONFIG)
 
 
-def setup(hass, config):
+@asyncio.coroutine
+def async_setup(hass, config):
     """Setup general services related to Home Assistant."""
+    @asyncio.coroutine
     def handle_turn_service(service):
         """Method to handle calls to homeassistant.turn_on/off."""
         entity_ids = extract_entity_ids(hass, service)
@@ -95,7 +97,9 @@ def setup(hass, config):
 
         # Group entity_ids by domain. groupby requires sorted data.
         by_domain = it.groupby(sorted(entity_ids),
-                               lambda item: split_entity_id(item)[0])
+                               lambda item: ha.split_entity_id(item)[0])
+
+        tasks = []
 
         for domain, ent_ids in by_domain:
             # We want to block for all calls and only return when all calls
@@ -112,27 +116,34 @@ def setup(hass, config):
             # ent_ids is a generator, convert it to a list.
             data[ATTR_ENTITY_ID] = list(ent_ids)
 
-            hass.services.call(domain, service.service, data, blocking)
+            tasks.append(hass.services.async_call(
+                domain, service.service, data, blocking))
 
-    hass.services.register(ha.DOMAIN, SERVICE_TURN_OFF, handle_turn_service)
-    hass.services.register(ha.DOMAIN, SERVICE_TURN_ON, handle_turn_service)
-    hass.services.register(ha.DOMAIN, SERVICE_TOGGLE, handle_turn_service)
+        yield from asyncio.wait(tasks, loop=hass.loop)
 
+    hass.services.async_register(
+        ha.DOMAIN, SERVICE_TURN_OFF, handle_turn_service)
+    hass.services.async_register(
+        ha.DOMAIN, SERVICE_TURN_ON, handle_turn_service)
+    hass.services.async_register(
+        ha.DOMAIN, SERVICE_TOGGLE, handle_turn_service)
+
+    @asyncio.coroutine
     def handle_reload_config(call):
         """Service handler for reloading core config."""
         from homeassistant.exceptions import HomeAssistantError
         from homeassistant import config as conf_util
 
         try:
-            path = conf_util.find_config_file(hass.config.config_dir)
-            conf = conf_util.load_yaml_config_file(path)
+            conf = yield from conf_util.async_hass_config_yaml(hass)
         except HomeAssistantError as err:
             _LOGGER.error(err)
             return
 
-        conf_util.process_ha_core_config(hass, conf.get(ha.DOMAIN) or {})
+        yield from conf_util.async_process_ha_core_config(
+            hass, conf.get(ha.DOMAIN) or {})
 
-    hass.services.register(ha.DOMAIN, SERVICE_RELOAD_CORE_CONFIG,
-                           handle_reload_config)
+    hass.services.async_register(
+        ha.DOMAIN, SERVICE_RELOAD_CORE_CONFIG, handle_reload_config)
 
     return True

@@ -31,7 +31,7 @@ LocationInfo = collections.namedtuple(
     "LocationInfo",
     ['ip', 'country_code', 'country_name', 'region_code', 'region_name',
      'city', 'zip_code', 'time_zone', 'latitude', 'longitude',
-     'use_fahrenheit'])
+     'use_metric'])
 
 
 def detect_location_info():
@@ -44,17 +44,17 @@ def detect_location_info():
     if data is None:
         return None
 
-    # From Wikipedia: Fahrenheit is used in the Bahamas, Belize,
-    # the Cayman Islands, Palau, and the United States and associated
-    # territories of American Samoa and the U.S. Virgin Islands
-    data['use_fahrenheit'] = data['country_code'] in (
-        'BS', 'BZ', 'KY', 'PW', 'US', 'AS', 'VI')
+    data['use_metric'] = data['country_code'] not in (
+        'US', 'MM', 'LR')
 
     return LocationInfo(**data)
 
 
 def distance(lat1, lon1, lat2, lon2):
-    """Calculate the distance in meters between two points."""
+    """Calculate the distance in meters between two points.
+
+    Async friendly.
+    """
     return vincenty((lat1, lon1), (lat2, lon2)) * 1000
 
 
@@ -83,7 +83,7 @@ def elevation(latitude, longitude):
 # Author: https://github.com/maurycyp
 # Source: https://github.com/maurycyp/vincenty
 # License: https://github.com/maurycyp/vincenty/blob/master/LICENSE
-# pylint: disable=too-many-locals, invalid-name, unused-variable
+# pylint: disable=invalid-name, unused-variable
 def vincenty(point1: Tuple[float, float], point2: Tuple[float, float],
              miles: bool=False) -> Optional[float]:
     """
@@ -91,6 +91,8 @@ def vincenty(point1: Tuple[float, float], point2: Tuple[float, float],
 
     Result in kilometers or miles between two points on the surface of a
     spheroid.
+
+    Async friendly.
     """
     # short-circuit coincident points
     if point1[0] == point2[0] and point1[1] == point2[1]:

@@ -4,7 +4,11 @@ Component to interface with binary sensors.
 For more details about this component, please refer to the documentation at
 https://home-assistant.io/components/binary_sensor/
 """
+import asyncio
+from datetime import timedelta
 import logging
+
+import voluptuous as vol
 
 from homeassistant.helpers.entity_component import EntityComponent
 from homeassistant.helpers.entity import Entity
@@ -12,7 +16,7 @@ from homeassistant.const import (STATE_ON, STATE_OFF)
 from homeassistant.helpers.config_validation import PLATFORM_SCHEMA  # noqa
 
 DOMAIN = 'binary_sensor'
-SCAN_INTERVAL = 30
+SCAN_INTERVAL = timedelta(seconds=30)
 
 ENTITY_ID_FORMAT = DOMAIN + '.{}'
 SENSOR_CLASSES = [
@@ -25,6 +29,7 @@ SENSOR_CLASSES = [
     'moisture',      # Specifically a wetness sensor
     'motion',        # Motion sensor
     'moving',        # On means moving, Off means stopped
+    'occupancy',     # On means occupied, Off means not occupied
     'opening',       # Door, window, etc.
     'power',         # Power, over-current, etc
     'safety',        # Generic on=unsafe, off=safe
@@ -33,14 +38,16 @@ SENSOR_CLASSES = [
     'vibration',     # On means vibration detected, Off means no vibration
 ]
 
+SENSOR_CLASSES_SCHEMA = vol.All(vol.Lower, vol.In(SENSOR_CLASSES))
 
-def setup(hass, config):
+
+@asyncio.coroutine
+def async_setup(hass, config):
     """Track states and offer events for binary sensors."""
     component = EntityComponent(
         logging.getLogger(__name__), DOMAIN, hass, SCAN_INTERVAL)
 
-    component.setup(config)
-
+    yield from component.async_setup(config)
     return True
 
 

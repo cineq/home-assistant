@@ -12,27 +12,29 @@ import queue
 import threading
 import time
 from datetime import timedelta, datetime
-from typing import Any, Union, Optional, List
+from typing import Any, Union, Optional, List, Dict
 
 import voluptuous as vol
 
-from homeassistant.helpers.typing import (ConfigType, QueryType,
-                                          HomeAssistantType)
-import homeassistant.util.dt as dt_util
-from homeassistant.const import (EVENT_HOMEASSISTANT_START,
-                                 EVENT_HOMEASSISTANT_STOP, EVENT_STATE_CHANGED,
-                                 EVENT_TIME_CHANGED, MATCH_ALL)
+from homeassistant.core import HomeAssistant, callback, split_entity_id
+from homeassistant.const import (
+    ATTR_ENTITY_ID, CONF_ENTITIES, CONF_EXCLUDE, CONF_DOMAINS,
+    CONF_INCLUDE, EVENT_HOMEASSISTANT_START, EVENT_HOMEASSISTANT_STOP,
+    EVENT_STATE_CHANGED, EVENT_TIME_CHANGED, MATCH_ALL)
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import track_point_in_utc_time
+from homeassistant.helpers.typing import ConfigType, QueryType
+import homeassistant.util.dt as dt_util
 
-DOMAIN = "recorder"
+DOMAIN = 'recorder'
 
-REQUIREMENTS = ['sqlalchemy==1.0.14']
+REQUIREMENTS = ['sqlalchemy==1.1.4']
 
-DEFAULT_URL = "sqlite:///{hass_config_path}"
-DEFAULT_DB_FILE = "home-assistant_v2.db"
+DEFAULT_URL = 'sqlite:///{hass_config_path}'
+DEFAULT_DB_FILE = 'home-assistant_v2.db'
 
-CONF_DB_URL = "db_url"
-CONF_PURGE_DAYS = "purge_days"
+CONF_DB_URL = 'db_url'
+CONF_PURGE_DAYS = 'purge_days'
 
 RETRIES = 3
 CONNECT_RETRY_WAIT = 10
@@ -40,10 +42,19 @@ QUERY_RETRY_WAIT = 0.1
 
 CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
-        vol.Optional(CONF_PURGE_DAYS): vol.All(vol.Coerce(int),
-                                               vol.Range(min=1)),
-        # pylint: disable=no-value-for-parameter
-        vol.Optional(CONF_DB_URL): vol.Url(),
+        vol.Optional(CONF_PURGE_DAYS):
+            vol.All(vol.Coerce(int), vol.Range(min=1)),
+        vol.Optional(CONF_DB_URL): cv.string,
+        vol.Optional(CONF_EXCLUDE, default={}): vol.Schema({
+            vol.Optional(CONF_ENTITIES, default=[]): cv.entity_ids,
+            vol.Optional(CONF_DOMAINS, default=[]):
+                vol.All(cv.ensure_list, [cv.string])
+        }),
+        vol.Optional(CONF_INCLUDE, default={}): vol.Schema({
+            vol.Optional(CONF_ENTITIES, default=[]): cv.entity_ids,
+            vol.Optional(CONF_DOMAINS, default=[]):
+                vol.All(cv.ensure_list, [cv.string])
+        })
     })
 }, extra=vol.ALLOW_EXTRA)
 
@@ -55,8 +66,8 @@ _LOGGER = logging.getLogger(__name__)
 Session = None  # pylint: disable=no-member
 
 
-def execute(q: QueryType) \
-        -> List[Any]:  # pylint: disable=invalid-sequence-index
+# pylint: disable=invalid-sequence-index
+def execute(q: QueryType) -> List[Any]:
     """Query the database and convert the objects to HA native form.
 
     This method also retries a few times in the case of stale connections.
@@ -95,13 +106,12 @@ def run_information(point_in_time: Optional[datetime]=None):
         (recorder_runs.end > point_in_time)).first()
 
 
-def setup(hass: HomeAssistantType, config: ConfigType) -> bool:
+def setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Setup the recorder."""
-    # pylint: disable=global-statement
-    global _INSTANCE
+    global _INSTANCE  # pylint: disable=global-statement
 
     if _INSTANCE is not None:
-        _LOGGER.error('Only a single instance allowed.')
+        _LOGGER.error("Only a single instance allowed")
         return False
 
     purge_days = config.get(DOMAIN, {}).get(CONF_PURGE_DAYS)
@@ -111,7 +121,10 @@ def setup(hass: HomeAssistantType, config: ConfigType) -> bool:
         db_url = DEFAULT_URL.format(
             hass_config_path=hass.config.path(DEFAULT_DB_FILE))
 
-    _INSTANCE = Recorder(hass, purge_days=purge_days, uri=db_url)
+    include = config.get(DOMAIN, {}).get(CONF_INCLUDE, {})
+    exclude = config.get(DOMAIN, {}).get(CONF_EXCLUDE, {})
+    _INSTANCE = Recorder(hass, purge_days=purge_days, uri=db_url,
+                         include=include, exclude=exclude)
 
     return True
 
@@ -154,21 +167,24 @@ def log_error(e: Exception, retry_wait: Optional[float]=0,
 class Recorder(threading.Thread):
     """A threaded recorder class."""
 
-    # pylint: disable=too-many-instance-attributes
-    def __init__(self, hass: HomeAssistantType, purge_days: int, uri: str) \
-            -> None:
+    def __init__(self, hass: HomeAssistant, purge_days: int, uri: str,
+                 include: Dict, exclude: Dict) -> None:
         """Initialize the recorder."""
         threading.Thread.__init__(self)
 
         self.hass = hass
         self.purge_days = purge_days
         self.queue = queue.Queue()  # type: Any
-        self.quit_object = object()
         self.recording_start = dt_util.utcnow()
         self.db_url = uri
         self.db_ready = threading.Event()
         self.engine = None  # type: Any
         self._run = None  # type: Any
+
+        self.include_e = include.get(CONF_ENTITIES, [])
+        self.include_d = include.get(CONF_DOMAINS, [])
+        self.exclude = exclude.get(CONF_ENTITIES, []) + \
+            exclude.get(CONF_DOMAINS, [])
 
         def start_recording(event):
             """Start recording."""
@@ -204,18 +220,35 @@ class Recorder(threading.Thread):
         while True:
             event = self.queue.get()
 
-            if event == self.quit_object:
+            if event is None:
                 self._close_run()
                 self._close_connection()
-                # pylint: disable=global-statement
-                global _INSTANCE
-                _INSTANCE = None
                 self.queue.task_done()
                 return
 
             if event.event_type == EVENT_TIME_CHANGED:
                 self.queue.task_done()
                 continue
+
+            if ATTR_ENTITY_ID in event.data:
+                entity_id = event.data[ATTR_ENTITY_ID]
+                domain = split_entity_id(entity_id)[0]
+
+                # Exclude entities OR
+                # Exclude domains, but include specific entities
+                if (entity_id in self.exclude) or \
+                        (domain in self.exclude and
+                         entity_id not in self.include_e):
+                    self.queue.task_done()
+                    continue
+
+                # Included domains only (excluded entities above) OR
+                # Include entities only, but only if no excludes
+                if (self.include_d and domain not in self.include_d) or \
+                        (self.include_e and entity_id not in self.include_e
+                         and not self.exclude):
+                    self.queue.task_done()
+                    continue
 
             dbevent = Events.from_event(event)
             self._commit(dbevent)
@@ -230,14 +263,18 @@ class Recorder(threading.Thread):
 
             self.queue.task_done()
 
+    @callback
     def event_listener(self, event):
         """Listen for new events and put them in the process queue."""
         self.queue.put(event)
 
     def shutdown(self, event):
         """Tell the recorder to shut down."""
-        self.queue.put(self.quit_object)
-        self.queue.join()
+        global _INSTANCE  # pylint: disable=global-statement
+        _INSTANCE = None
+
+        self.queue.put(None)
+        self.join()
 
     def block_till_done(self):
         """Block till all events processed."""
@@ -249,8 +286,7 @@ class Recorder(threading.Thread):
 
     def _setup_connection(self):
         """Ensure database is ready to fly."""
-        # pylint: disable=global-statement
-        global Session
+        global Session  # pylint: disable=global-statement
 
         import homeassistant.components.recorder.models as models
         from sqlalchemy import create_engine
@@ -273,8 +309,7 @@ class Recorder(threading.Thread):
 
     def _close_connection(self):
         """Close the connection."""
-        # pylint: disable=global-statement
-        global Session
+        global Session  # pylint: disable=global-statement
         self.engine.dispose()
         self.engine = None
         Session = None
